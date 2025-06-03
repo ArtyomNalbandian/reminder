@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from datetime import datetime
+from pydantic import BaseModel, validator
+from datetime import datetime, timezone
 from typing import Optional
 from .models import NotificationType
 
@@ -10,7 +10,14 @@ class ReminderBase(BaseModel):
     recipient: str
 
 class ReminderCreate(ReminderBase):
-    pass
+    @validator('notification_time')
+    def validate_notification_time(cls, v):
+        current_time = datetime.now(timezone.utc)
+        notification_time = v.replace(tzinfo=timezone.utc)
+        
+        if notification_time <= current_time:
+            raise ValueError("Notification time must be in the future")
+        return v
 
 class ReminderResponse(ReminderBase):
     id: int

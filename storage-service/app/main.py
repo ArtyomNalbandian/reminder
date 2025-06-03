@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 from . import models, schemas, database
 from typing import List, Optional
@@ -21,6 +21,16 @@ NOTIFICATION_SERVICE_URL = "http://notification-service:8000"
 
 @app.post("/reminders/", response_model=schemas.ReminderResponse)
 async def create_reminder(reminder: schemas.ReminderCreate, db: Session = Depends(database.get_db)):
+    # Проверяем, что дата напоминания не в прошлом
+    current_time = datetime.now(timezone.utc)
+    reminder_time = reminder.notification_time.replace(tzinfo=timezone.utc)
+    
+    if reminder_time <= current_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Notification time cannot be in the past"
+        )
+    
     db_reminder = models.Reminder(
         **reminder.dict(),
         status="pending",
