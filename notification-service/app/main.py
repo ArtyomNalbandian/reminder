@@ -5,17 +5,25 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from . import models, schemas, database, notifications
 import os
+import httpx
+import logging
 
 app = FastAPI(title="Reminder Notification Service")
 
 # Create database tables
 models.Base.metadata.create_all(bind=database.engine)
 
+STORAGE_SERVICE_URL = "http://storage-service:8000"
+
 # Configure APScheduler with SQLAlchemy job store
 jobstores = {
     'default': SQLAlchemyJobStore(url=os.getenv("DATABASE_URL"))
 }
 scheduler = AsyncIOScheduler(jobstores=jobstores)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def send_notification(notification_id: int):
     # Create a new database session for this job
@@ -26,7 +34,10 @@ async def send_notification(notification_id: int):
         ).first()
         
         if not notification or notification.status != "scheduled":
+            logger.info(f"Notification {notification_id} skipped: status={notification.status if notification else 'not found'}")
             return
+        
+        logger.info(f"Sending notification {notification_id} (reminder_id={notification.reminder_id})")
         
         success = False
         if notification.notification_type == models.NotificationType.FCM:
@@ -44,6 +55,22 @@ async def send_notification(notification_id: int):
         
         notification.status = "sent" if success else "error"
         db.commit()
+        logger.info(f"Notification {notification_id} delivery status: {'success' if success else 'error'}")
+
+        # Notify storage service about the status
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(f"Updating reminder {notification.reminder_id} status to {'sent' if success else 'error'}")
+                status_response = await client.put(
+                    f"{STORAGE_SERVICE_URL}/reminders/{notification.reminder_id}/status",
+                    params={"status": "sent" if success else "error"}
+                )
+                if status_response.status_code != 200:
+                    logger.error(f"Failed to update status in storage service. Status code: {status_response.status_code}, Response: {status_response.text}")
+                else:
+                    logger.info(f"Successfully updated reminder {notification.reminder_id} status")
+            except httpx.RequestError as e:
+                logger.error(f"Failed to update status in storage service: {str(e)}")
     finally:
         db.close()
 

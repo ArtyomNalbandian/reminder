@@ -10,6 +10,7 @@ class ReminderStatus(str, Enum):
     PENDING = "pending"
     CANCELLED = "cancelled"
     ERROR = "error"
+    SENT = "sent"
 
 app = FastAPI(title="Reminder Storage Service")
 
@@ -96,4 +97,19 @@ async def cancel_reminder(reminder_id: int, db: Session = Depends(database.get_d
     
     reminder.status = "cancelled"
     db.commit()
-    return {"message": "Reminder cancelled successfully"} 
+    return {"message": "Reminder cancelled successfully"}
+
+@app.put("/reminders/{reminder_id}/status", response_model=schemas.ReminderResponse)
+async def update_reminder_status(
+    reminder_id: int,
+    status: ReminderStatus,
+    db: Session = Depends(database.get_db)
+):
+    reminder = db.query(models.Reminder).filter(models.Reminder.id == reminder_id).first()
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    
+    reminder.status = status
+    db.commit()
+    db.refresh(reminder)
+    return reminder 
